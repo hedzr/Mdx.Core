@@ -27,7 +27,7 @@ namespace Tests
         }
 
         [Fact]
-        void Add_MaximumSumResult_ThrowsOverflowException()
+        public void Add_MaximumSumResult_ThrowsOverflowException()
         {
             var stringCalculator = new StringCalculator();
             const string maximumResult = "4623784623462364283467238472361001";
@@ -76,6 +76,7 @@ namespace Tests
         }
     }
 
+    [SuppressMessage("ReSharper", "ForeachCanBePartlyConvertedToQueryUsingAnotherGetEnumerator")]
     public class UnitTest2
     {
         [Fact]
@@ -94,7 +95,7 @@ namespace Tests
 
             //可以用ToList()从IEnumerable<out T>创建一个List<T>,并获得长度3
             Console.WriteLine(FilterWithoutYield().ToList().Count());
-            Console.ReadLine();
+            // Console.ReadLine();
         }
 
         static List<int> Data()
@@ -119,6 +120,7 @@ namespace Tests
         // ReSharper disable once ArrangeTypeMemberModifiers
         static IEnumerable<int> FilterWithYield()
         {
+            // ReSharper disable once SuggestVarOrType_BuiltInTypes
             foreach (int i in Data())
             {
                 if (i > 2)
@@ -126,7 +128,7 @@ namespace Tests
             }
 
             // ReSharper disable once RedundantJumpStatement
-            yield break; // 迭代器代码使用yield return 语句依次返回每个元素，yield break将终止迭代。
+            yield break; // 迭代器代码使用 yield return 语句依次返回每个元素，yield break将终止迭代。
         }
     }
 
@@ -159,6 +161,8 @@ namespace Tests
 
             process1.Join();
             process2.Join();
+
+            Console.WriteLine("UnitTest3 ok");
         }
 
         private static void TestSingleton(string value)

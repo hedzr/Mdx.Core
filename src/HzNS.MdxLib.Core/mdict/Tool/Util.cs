@@ -11,8 +11,14 @@ namespace HzNS.MdxLib.MDict.Tool
     /// <summary>
     /// Tools
     /// </summary>
-    public class Util
+    public static class Util
     {
+        public static string StripPathExt(string pathName)
+        {
+            return pathName.Remove(pathName.Length - Path.GetExtension(pathName).Length);
+        }
+
+        
         #region Xml operations : FromXml, ToXml
 
         /// <summary>

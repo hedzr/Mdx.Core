@@ -25,7 +25,8 @@ namespace HzNS.MdxLib.models
 
         public override string ToString()
         {
-            return string.Format("{0}({1}/0x{1:X06}). #{3}, ofs={4}, len={5}", Keyword, RelOffsetUL, 0, CIIndex,
+            return string.Format("{0}({1}/0x{1:X06}). #{3}, ofs={4}, len={5}", 
+                Keyword, RelOffsetUL, 0, CIIndex,
                 CIUncompOffset, CIUncompLength);
         }
     }

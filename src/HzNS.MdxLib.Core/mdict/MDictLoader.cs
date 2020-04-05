@@ -23,6 +23,7 @@ namespace HzNS.MdxLib.MDict
             this.doOpen(dictFileName);
         }
 
+
         #region Log File
 
         private FileStream _fsLog;
@@ -66,6 +67,7 @@ namespace HzNS.MdxLib.MDict
 
         #endregion
 
+
         public override Loader Open(string dictFileName)
         {
             base.Open(dictFileName);
@@ -96,6 +98,12 @@ namespace HzNS.MdxLib.MDict
             return this;
         }
 
+
+        /// <summary>
+        /// In non-PreloadAll mode, these parts will be loaded in memory: header, root, kw1.
+        /// </summary>
+        public bool PreloadAll { get; set; }
+
         private MDictIndex _seg0;
         private MDictKwIndexTable _seg1;
         private MDictContentIndexTable _seg2;
@@ -112,6 +120,10 @@ namespace HzNS.MdxLib.MDict
             set => _seg1 = value;
         }
 
+        /// <summary>
+        /// 
+        /// Available in PreloadAll mode.
+        /// </summary>
         public override MDictContentIndexTable DictLargeContentIndexTable
         {
             get => _seg2;
@@ -121,11 +133,15 @@ namespace HzNS.MdxLib.MDict
         /// <summary>
         /// 通过关键字访问条目正文内容时，使用Items中计算出来的索引信息，
         /// 这些信息经过了整合或折算，可以以最快速度访问到目标。
+        ///
+        /// Available in PreloadAll mode.
         /// </summary>
         public KwIndex2[] Items => _seg1?.IndexList2;
 
         /// <summary>
         /// hash排序的快速搜索表，从关键字定位到Items的下标
+        /// 
+        /// Available in PreloadAll mode.
         /// </summary>
         public Dictionary<string, int> KeywordToItemIndex { get; set; }
 
@@ -147,7 +163,8 @@ namespace HzNS.MdxLib.MDict
                 if (this.DictHeader.GeneratedByEngineVersion != "2.0" &&
                     this.DictHeader.GeneratedByEngineVersion != "1.2")
                 {
-                    ErrorLog("Not a valid mdx/mdd file or its version cannot be supported: " + this.DictHeader.GeneratedByEngineVersion);
+                    ErrorLog("Not a valid mdx/mdd file or its version cannot be supported: " +
+                             this.DictHeader.GeneratedByEngineVersion);
                     return false;
                 }
             }
@@ -160,6 +177,11 @@ namespace HzNS.MdxLib.MDict
             return true;
         }
 
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <returns></returns>
         public override bool Process()
         {
             const int count = 32768;
@@ -179,7 +201,8 @@ namespace HzNS.MdxLib.MDict
                 if (this.DictHeader.GeneratedByEngineVersion != "2.0" &&
                     this.DictHeader.GeneratedByEngineVersion != "1.2")
                 {
-                    ErrorLog("Not a valid mdx/mdd file or its version cannot be supported: " + this.DictHeader.GeneratedByEngineVersion);
+                    ErrorLog("Not a valid mdx/mdd file or its version cannot be supported: " +
+                             this.DictHeader.GeneratedByEngineVersion);
                     return false;
                 }
 
@@ -187,14 +210,14 @@ namespace HzNS.MdxLib.MDict
                 Log($"             ---- EngineVersion: {this.DictHeader.GeneratedByEngineVersion}");
 
                 //MDict的根索引表
-                LoadKmDictIndex(fs, fs.Name);
+                LoadMDictIndex(fs, fs.Name);
 
                 // segment 1
                 Log("");
                 //读取和解压缩一级索引表
                 LoadKwIndex1Table(fs, fs.Name);
 
-                if (walkOnContentIndexTable)
+                if (PreloadAll)
                 {
                     var posSeg1BlockStart = fs.Position;
                     //二级索引表
@@ -208,9 +231,95 @@ namespace HzNS.MdxLib.MDict
                     }
                     else
                     {
-                        ErrorLog($"   The 2nd index table ignored (too many entries): {this.DictIndex.TotalEntries} entries.");
+                        ErrorLog(
+                            $"   The 2nd index table ignored (too many entries): {this.DictIndex.TotalEntries} entries.");
                     }
                 }
+                else
+                {
+                    // short version: preload the content index table:
+
+                    #region preload content index table
+
+                    _seg2 = new MDictContentIndexTable();
+
+                    fs.Seek((long) ContentIndexTableBeginPos, SeekOrigin.Begin);
+                    if (DictHeader.GeneratedByEngineVersion == "2.0")
+                    {
+                        DictLargeContentIndexTable.Count = readUInt64(fs); //0x0260
+                        DictLargeContentIndexTable.L2 = readUInt64(fs); //0x0133a0
+                        DictLargeContentIndexTable.IndexTableLength = readUInt64(fs); //0x2600
+                        DictLargeContentIndexTable.L4 = readUInt64(fs); //0x5cd933
+                    }
+                    else
+                    {
+                        DictLargeContentIndexTable.Count = readUInt32(fs); //0x0260
+                        DictLargeContentIndexTable.L2 = readUInt32(fs); //0x0133a0
+                        DictLargeContentIndexTable.IndexTableLength = readUInt32(fs); //0x2600
+                        DictLargeContentIndexTable.L4 = readUInt32(fs); //0x5cd933
+                    }
+
+                    var tmpData = new byte[DictLargeContentIndexTable.IndexTableLength];
+                    fs.Read(tmpData, 0, tmpData.Length);
+
+                    DictLargeContentIndexTable.IndexesRawData = new List<byte>();
+                    DictLargeContentIndexTable.IndexesRawData.AddRange(tmpData);
+
+                    DictLargeContentIndexTable.Seg2ContentBlockOffset = (ulong) fs.Position;
+                    DictLargeContentIndexTable.Indexes =
+                        new ContentIndex[(int) (DictLargeContentIndexTable.IndexTableLength /
+                                                (DictHeader.GeneratedByEngineVersion == "2.0" ? 8UL : 4UL) / 2)];
+                    //List<ContentIndex> list = new List<ContentIndex>();
+                    ulong sum1 = 0, sum2 = 0;
+                    var k = 0;
+                    for (var ix = 0; ix < (int) DictLargeContentIndexTable.IndexTableLength; k++)
+                    {
+                        var ci = new ContentIndex();
+                        if (DictHeader.GeneratedByEngineVersion == "2.0")
+                        {
+                            ci.CompressedSize = readUInt64(tmpData, ix);
+                            ci.UncompressedSize = readUInt64(tmpData, ix + 8);
+                            ix += 16;
+                        }
+                        else
+                        {
+                            ci.CompressedSize = readUInt32(tmpData, ix);
+                            ci.UncompressedSize = readUInt32(tmpData, ix + 4);
+                            ix += 8;
+                        }
+
+                        ci.Offset = sum1;
+                        ci.OffsetUncomp = sum2;
+
+                        DictLargeContentIndexTable.Indexes[k] = ci;
+
+                        sum1 += ci.CompressedSize;
+                        sum2 += ci.UncompressedSize;
+
+                        Log($"      > {k:D4} : {ci}");
+                        // Console.WriteLine($"      > {k:D4} : {ci}");
+                    }
+
+                    var cil = DictLargeContentIndexTable.Indexes[k - 1];
+                    var ofs = cil.Offset + cil.CompressedSize;
+                    var absOfs = ContentIndexTableEndPos + ofs;
+                    Log($"      > {k:D4} : OFS: {ofs}/0x{ofs:X8}, ABS OFS = {absOfs}/{absOfs:X8}");
+                    // Console.WriteLine($"      > {k:D4} : OFS: {ofs}/0x{ofs:X8}, ABS OFS = {absOfs}/{absOfs:X8}");
+                    _seg2.MagicNumber = readUInt32(fs);
+                    // var j2 = readUInt32(fs); //CRC32?
+                    
+                    #endregion
+
+                    // BuildFastRefPointers(fs, fs.Name);
+                }
+
+                Log("");
+                Log(string.Format("Seg1: 0x{1:X16}/{1} - 0x{2:X16}/{2} [LEN: 0x{3:X16}/{3}] | FilePos: 0x{4:X16}/{4}",
+                    0, Seg1BeginPos, Seg1EndPos - 1, _seg0.Seg1Length, fs.Position - 4));
+                Log(string.Format("Seg2: 0x{1:X16}/{1} - 0x{2:X16}/{2} [LEN: 0x{3:X16}/{3}]",
+                    0, Seg2BeginPos, Seg2EndPos - 1, _seg0.Seg2RawLength));
+                Log(
+                    $"ContentIndexTableBeginPos: 0x{ContentIndexTableBeginPos:X8}/{ContentIndexTableBeginPos} - 0x{ContentIndexTableEndPos:X8}/{ContentIndexTableEndPos} [LEN: 0x{DictLargeContentIndexTable?.IndexTableLength:X8}/{DictLargeContentIndexTable?.IndexTableLength}, COUNT: 0x{DictLargeContentIndexTable?.Count:X8}/{DictLargeContentIndexTable?.Count}]");
 
                 return true;
 
@@ -417,6 +526,7 @@ namespace HzNS.MdxLib.MDict
             }
             finally
             {
+                _fsLog?.Flush();
                 // fs.Dispose();
             }
         }
@@ -453,6 +563,7 @@ namespace HzNS.MdxLib.MDict
                 }
 
                 this.HeaderIsValidate = true;
+                this.HeaderBytes = (ulong) xmlBytes;
 
                 if (string.IsNullOrEmpty(this.DictHeader.Encoding))
                     this.DictHeader.Encoding = this.IsLibraryData ? "utf-16LE" : "UTF-8";
@@ -468,6 +579,21 @@ namespace HzNS.MdxLib.MDict
 
         #endregion
 
+        protected ulong UnitLen => (ulong) (DictHeader.GeneratedByEngineVersion == "2.0" ? 8 : 4);
+
+        protected ulong HeaderEndPos => 4 + HeaderBytes;
+        protected ulong MdictIndexBeginPos => HeaderEndPos; // + 4 bytes Seed, + 4 bytes CRC
+        protected ulong MdictIndexEndPos => MdictIndexBeginPos + 4 + 5 * UnitLen + 4; // 
+        protected ulong Seg1BeginPos => MdictIndexEndPos; // point to the magic-number
+        protected ulong Seg1EndPos => Seg1BeginPos + _seg0.Seg1Length;
+        public ulong Seg2BeginPos => Seg1EndPos;
+        public ulong Seg2EndPos => Seg2BeginPos + _seg0.Seg2RawLength;
+        public ulong ContentIndexTableBeginPos => Seg2EndPos;
+
+        public ulong ContentIndexTableEndPos =>
+            (DictLargeContentIndexTable?.IndexTableLength ?? (ulong) 0) + 4 * UnitLen + ContentIndexTableBeginPos;
+
+
         #region loadMDictIndex
 
         /// <summary>
@@ -475,10 +601,12 @@ namespace HzNS.MdxLib.MDict
         /// </summary>
         /// <param name="fs"></param>
         /// <param name="fsName"></param>
-        private void LoadKmDictIndex(Stream fs, string fsName)
+        private void LoadMDictIndex(Stream fs, string fsName)
         {
             _seg0 = null;
             _seg0 = new MDictIndex {Seed = new byte[4], maybeCRC32 = readUInt32(fs)};
+
+            #region reading
 
             //_seg0.Values = new List<long>(5);
 
@@ -495,13 +623,13 @@ namespace HzNS.MdxLib.MDict
                 this._seg0.TotalEntries = readUInt64(fs);
                 this._seg0.Seg1UncompressedSize = readUInt64(fs);
                 this._seg0.Seg1Length = readUInt64(fs);
-                this._seg0.Seg2RelOffset = readUInt64(fs);
-                Log(string.Format("  int32 #00: 0x{1:X16}/{1}", 0, this._seg0.CountOfSeg1Indexes));
+                this._seg0.Seg2RawLength = readUInt64(fs);
+                Log(string.Format("  int32 #00: 0x{1:X16}/{1} | CountOfSeg1Indexes", 0, this._seg0.CountOfSeg1Indexes));
                 Log(string.Format("  int32 #01: 0x{1:X16}/{1} | TotalEntries", 0, this._seg0.TotalEntries));
                 Log(string.Format("  int32 #02: 0x{1:X16}/{1} | Seg1 Uncompressed Size", 0,
                     this._seg0.Seg1UncompressedSize));
                 Log(string.Format("  int32 #03: 0x{1:X16}/{1} | Seg1 Compressed Size", 0, this._seg0.Seg1Length));
-                Log(string.Format("  int32 #04: 0x{1:X16}/{1} | Seg2 relative Offset", 0, this._seg0.Seg2RelOffset));
+                Log(string.Format("  int32 #04: 0x{1:X16}/{1} | Seg2 relative Offset", 0, this._seg0.Seg2RawLength));
                 _seg0.i8NeverUsed = readUInt32(fs);
                 _seg0.MagicNumber = readUInt32(fs);
                 fs.Read(_seg0.Seed, 0, 4);
@@ -512,17 +640,20 @@ namespace HzNS.MdxLib.MDict
                 this._seg0.TotalEntries = readUInt32(fs);
                 this._seg0.Seg1UncompressedSize = readUInt32(fs);
                 this._seg0.Seg1Length = 0;
-                this._seg0.Seg2RelOffset = readUInt32(fs);
-                LogString(string.Format("  int32 #00: 0x{1:X16}/{1}\n", 0, this._seg0.CountOfSeg1Indexes));
+                this._seg0.Seg2RawLength = readUInt32(fs);
+                LogString(string.Format("  int32 #00: 0x{1:X16}/{1} | CountOfSeg1Indexes\n", 0,
+                    this._seg0.CountOfSeg1Indexes));
                 LogString(string.Format("  int32 #01: 0x{1:X16}/{1} | TotalEntries\n", 0, this._seg0.TotalEntries));
                 LogString(string.Format("  int32 #02: 0x{1:X16}/{1} | Seg1 Uncompressed Size\n", 0,
                     this._seg0.Seg1UncompressedSize));
                 //LogString(string.Format("  int32 #03: 0x{1:X16}/{1} | Seg1 Compressed Size\n", 0, this._seg0.Seg1Length));
                 LogString(string.Format("  int32 #04: 0x{1:X16}/{1} | Seg2 relative Offset\n", 0,
-                    this._seg0.Seg2RelOffset));
+                    this._seg0.Seg2RawLength));
                 _seg0.i8NeverUsed = 0;
                 _seg0.MagicNumber = 0;
             }
+
+            #endregion
 
             if (_seg0.MagicNumber == 0x02000000 || this.DictHeader.GeneratedByEngineVersion == "1.2") return;
 
@@ -533,7 +664,7 @@ namespace HzNS.MdxLib.MDict
 
         #endregion
 
-        #region loadKWIndexTable
+        #region loadKWIndex1Table
 
         /// <summary>
         /// root-level index table & level-1 index table
@@ -613,7 +744,7 @@ namespace HzNS.MdxLib.MDict
                         if (mod8 == 15) Log("");
                     }
 
-                    writeFile(CompressUtil.stripPathExt(fsName) + ".seg1.out.dmp", _seg1.IndexesRawData.ToArray(), j1);
+                    writeFile(Util.StripPathExt(fsName) + ".seg1.out.dmp", _seg1.IndexesRawData.ToArray(), j1);
                 }
 
                 Log("");
@@ -629,7 +760,7 @@ namespace HzNS.MdxLib.MDict
                     using (var outs = new MemoryStream(arrayOfByte7))
                     {
                         // CompressUtil.InflaterDecompressBuffer(_seg1.IndexesRawData.ToArray(), 0, j1, outs);
-                        CompressUtil.InflateBufferWithPureZlib(_seg1.IndexesRawData.ToArray(), j1, outs);
+                        Zipper.InflateBufferWithPureZlib(_seg1.IndexesRawData.ToArray(), j1, outs);
                     }
 
                     ok = arrayOfByte7.Length == (int) _seg0.Seg1UncompressedSize;
@@ -648,7 +779,7 @@ namespace HzNS.MdxLib.MDict
 
                     if (debugModeEnable)
                     {
-                        writeFile(CompressUtil.stripPathExt(fsName) + ".seg1.out.decomp.dmp", arrayOfByte7);
+                        writeFile(Util.StripPathExt(fsName) + ".seg1.out.decomp.dmp", arrayOfByte7);
                     }
 
                     #endregion
@@ -926,7 +1057,7 @@ namespace HzNS.MdxLib.MDict
 
         #endregion
 
-        #region loadKWIndexTable2ndLevel
+        #region LoadKwIndex2Table
 
         /// <summary>
         /// 二级索引表。
@@ -977,7 +1108,9 @@ namespace HzNS.MdxLib.MDict
 
                         try
                         {
-                            var txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length, false);
+                            // var txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length, false);
+                            // TODO need review and debug
+                            var txt = Zipper.InflateBufferWithPureZlib(rawData, rawData.Length);
 
                             #region debug
 
@@ -1021,7 +1154,7 @@ namespace HzNS.MdxLib.MDict
 
                                 kwi2.Keyword = DictHeader.LanguageMode.GetString(txt, ofs0, ofs - ofs0).TrimEnd('\0');
                                 list2.Add(kwi2);
-                                if (kwiIdx == 0 || kwiIdx == _seg1.IndexList.Length - 1)
+                                if (kwiIdx == 0 || kwiIdx == _seg1.IndexList.Length - 1 || dumpAllKeywords)
                                     Log($"    > {kwi2}");
                             }
 
@@ -1030,7 +1163,7 @@ namespace HzNS.MdxLib.MDict
                         catch (Exception ex)
                         {
                             ErrorLog(ex.ToString());
-                            var path = $"{CompressUtil.stripPathExt(fsName)}.seg1.kwi.{kwiIdx:D5}.raw.v2.0.prb";
+                            var path = $"{Util.StripPathExt(fsName)}.seg1.kwi.{kwiIdx:D5}.raw.v2.0.prb";
                             writeFile(path, rawData);
                             //write_file(CompressUtil.stripPathExt(fsName) + string.Format(".seg1.kwi.{0:D5}.bin.v2.0.prb", kwi_idx), rawdata);
                             //throw ex;
@@ -1072,7 +1205,7 @@ namespace HzNS.MdxLib.MDict
                             //        fsOut.Write(dst000, 0, dst000.Length);
                             //    }
                             //    src000 = new byte[65536];
-                            //    int srcSize = MiniLZO.Decompress(dst000, src000);
+                            //    int srcSize = Zipper.MiniLzoDecompress(dst000, src000);
                             //    using (FileStream fsOut = File.Create(seg1name1 + ".comp.decomp"))
                             //    {
                             //        fsOut.Write(src000, 0, srcSize);
@@ -1085,7 +1218,7 @@ namespace HzNS.MdxLib.MDict
                             var decompSize = 0;
                             try
                             {
-                                decompSize = MiniLZO.Decompress(rawData, decompData);
+                                decompSize = Zipper.MiniLzoDecompress(rawData, decompData);
                             }
                             catch (Exception ex)
                             {
@@ -1093,7 +1226,7 @@ namespace HzNS.MdxLib.MDict
                                 if (b == false)
                                 {
                                     Log(ex.ToString());
-                                    var path = $"{CompressUtil.stripPathExt(fsName)}.seg1.kwi.{kwiIdx:D5}.raw.v1.x.prb";
+                                    var path = $"{Util.StripPathExt(fsName)}.seg1.kwi.{kwiIdx:D5}.raw.v1.x.prb";
                                     writeFile(path, rawData);
                                     //write_file(CompressUtil.stripPathExt(fsName) + string.Format(".seg1.kwi.{0:D5}.bin.v1.x.prb", kwi_idx), rawdata);
                                     //throw ex;
@@ -1236,7 +1369,7 @@ namespace HzNS.MdxLib.MDict
                                         //Array.Copy(rawdata, 0, xyz, BitConverter.GetBytes(j2).Length*2, rawdata.Length);
                                         //_decompData = LZOHelper.LZOCompressor.Decompress(xyz, 0, (int)kwi.UncompressedSize);
 
-                                        MiniLZO.Decompress(rawData, 0, (int) kwi.CompressedSize, decompData);
+                                        Zipper.MiniLzoDecompress(rawData, 0, (int) kwi.CompressedSize, decompData);
                                         // decompData = LZOHelper.LZOCompressor.Decompress(rawdata, 0, (int) kwi.UncompressedSize);
                                         //if (kwi_idx < 3)
                                         //    write_file(string.Format("{0}.seg1.kwi.{1:D5}.unz", CompressUtil.stripPathExt(fsName), kwi_idx), _decompData, _decompData.Length);
@@ -1254,7 +1387,7 @@ namespace HzNS.MdxLib.MDict
                                 //    try
                                 //    {
                                 //        _decompData = new byte[kwi.UncompressedSize];
-                                //        _decompSize = MiniLZO.Decompress(rawdata, _decompData);
+                                //        _decompSize = Zipper.MiniLzoDecompress(rawdata, _decompData);
                                 //        ok = _decompSize == (int)kwi.UncompressedSize;
                                 //    }
                                 //    catch (Exception ex) { Debug.WriteLine(ex.ToString()); }
@@ -1263,7 +1396,7 @@ namespace HzNS.MdxLib.MDict
                                 if (!ok)
                                 {
                                     ErrorLog("BAD");
-                                    var path = $"{CompressUtil.stripPathExt(fsName)}.seg1.kwi.{kwiIdx:D5}.raw.v1.2.prb";
+                                    var path = $"{Util.StripPathExt(fsName)}.seg1.kwi.{kwiIdx:D5}.raw.v1.2.prb";
                                     writeFile(path, rawData);
                                     //write_file(CompressUtil.stripPathExt(fsName) + string.Format(".seg1.kwi.{0:D5}.bin.v1.2.prb", kwi_idx), rawdata);
                                 }
@@ -1354,7 +1487,8 @@ namespace HzNS.MdxLib.MDict
 
                             kwi2.Keyword = DictHeader.LanguageMode.GetString(rawData, ofs0, ofs - ofs0).TrimEnd('\0');
                             list2.Add(kwi2);
-                            Log($"    > {kwi2}");
+                            if (dumpAllKeywords)
+                                Log($"    > {kwi2}");
                         }
 
                         #endregion
@@ -1391,7 +1525,7 @@ namespace HzNS.MdxLib.MDict
             Log("");
             Log("");
             Log(">> 提取内容块中的索引表...");
-            fs.Seek((long) DictIndex.Seg2RelOffset + posSeg1BlockStart, SeekOrigin.Begin); //position = 0x928fc
+            fs.Seek((long) DictIndex.Seg2RawLength + posSeg1BlockStart, SeekOrigin.Begin); //position = 0x928fc
             Log(string.Format("   filepos={0}/0x{0:X8}", fs.Position));
             if (DictHeader.GeneratedByEngineVersion == "2.0")
             {
@@ -1580,7 +1714,9 @@ namespace HzNS.MdxLib.MDict
 
                     try
                     {
-                        var txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length);
+                        // var txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length);
+                        // TODO need review and debug
+                        var txt = Zipper.InflateBufferWithPureZlib(rawData, rawData.Length);
                         //if (k < 1)
                         //{
                         //    string seg2name1 = CompressUtil.stripPathExt(fsName) + ".seg2.cti." + k + ".unz";
@@ -1613,14 +1749,14 @@ namespace HzNS.MdxLib.MDict
                         {
                             try
                             {
-                                MiniLZO.Decompress(rawData, 0, (int) ci.CompressedSize, _decompData);
+                                Zipper.MiniLzoDecompress(rawData, 0, (int) ci.CompressedSize, _decompData);
                                 // _decompData = LZOHelper.LZOCompressor.Decompress1x(rawdata, 0, (int) ci.UncompressedSize);
                                 ok = true;
                             }
                             catch (Exception ex)
                             {
                                 Debug.WriteLine(ex);
-                                var path = $"{CompressUtil.stripPathExt(fsName)}.seg2.cti.{k:D5}.prb";
+                                var path = $"{Util.StripPathExt(fsName)}.seg2.cti.{k:D5}.prb";
                                 writeFile(path, rawData, rawData.Length);
                             }
                         }
@@ -1629,7 +1765,7 @@ namespace HzNS.MdxLib.MDict
                         {
                             try
                             {
-                                _decompSize = MiniLZO.Decompress(rawData, 0, rawData.Length, _decompData);
+                                _decompSize = Zipper.MiniLzoDecompress(rawData, _decompData);
                                 ok = true;
                             }
                             catch (Exception ex)
@@ -1642,7 +1778,7 @@ namespace HzNS.MdxLib.MDict
                         {
                             try
                             {
-                                MiniLZO.Decompress(rawData, 0, (int) ci.CompressedSize, _decompData);
+                                Zipper.MiniLzoDecompress(rawData, 0, (int) ci.CompressedSize, _decompData);
                                 // _decompData = LZOHelper.LZOCompressor.Decompress(rawdata, 0, (int) ci.UncompressedSize);
                                 //write_file(path, _decompData, _decompData.Length);
                                 ok = _decompData.Length == (int) ci.UncompressedSize;
@@ -1707,7 +1843,7 @@ namespace HzNS.MdxLib.MDict
 
         #endregion
 
-        #region loadContentByKeyword
+        #region LoadContentBytesByKeyword
 
         public override byte[] LoadContentBytesByKeyword(KwIndex2 kwi2)
         {
@@ -1745,7 +1881,9 @@ namespace HzNS.MdxLib.MDict
 
                 try
                 {
-                    var txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length);
+                    // var txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length);
+                    // TODO need review and debug
+                    var txt = Zipper.InflateBufferWithPureZlib(rawData, rawData.Length);
                     //if (k < 1)
                     //{
                     //    seg2name1 = string.Format("{0}.seg2.cti.{1:D5}.unz", CompressUtil.stripPathExt(fs.Name), k); 
@@ -1783,7 +1921,7 @@ namespace HzNS.MdxLib.MDict
                 {
                     try
                     {
-                        MiniLZO.Decompress(rawData, 0, (int) ci.CompressedSize - 8, _decompData);
+                        Zipper.MiniLzoDecompress(rawData, 0, (int) ci.CompressedSize - 8, _decompData);
                         // _decompData = LZOHelper.LZOCompressor.Decompress(rawdata, 0, (int) ci.CompressedSize - 8, (int) ci.UncompressedSize);
                         //string path = string.Format("{0}.ctt.blk.ofs.{1}.unz", CompressUtil.stripPathExt(fs.Name), kwi2.RelOffsetUL);
                         //write_file(path, _decompData, _decompData.Length);
@@ -1807,12 +1945,12 @@ namespace HzNS.MdxLib.MDict
                         // 1.2版本格式，cti数据块的长度为CompressedSize-8，数据块的末尾8个字节含义暂时未知。
                         //byte[] xyz = new byte[rawdata.Length - 8];
                         //Array.Copy(rawdata, xyz, xyz.Length);
-                        MiniLZO.Decompress(rawData, 0, rawData.Length - 8, _decompData);
-                        // _decompSize = MiniLZO.Decompress(rawdata, 0, rawdata.Length - 8, _decompData);
+                        Zipper.MiniLzoDecompress(rawData, 0, rawData.Length - 8, _decompData);
+                        // _decompSize = Zipper.MiniLzoDecompress(rawdata, 0, rawdata.Length - 8, _decompData);
                         //xyz = new byte[8];
                         //byte[] _decompData1 = new byte[100];
                         //Array.Copy(rawdata, ci.CompressedSize-8, xyz, 0, xyz.Length);
-                        //_decompSize = MiniLZO.Decompress(xyz, _decompData1);
+                        //_decompSize = Zipper.MiniLzoDecompress(xyz, _decompData1);
 
                         #region debug
 
@@ -1848,7 +1986,7 @@ namespace HzNS.MdxLib.MDict
                 {
                     try
                     {
-                        MiniLZO.Decompress(rawData, 0, (int) ci.CompressedSize, _decompData);
+                        Zipper.MiniLzoDecompress(rawData, 0, (int) ci.CompressedSize, _decompData);
                         // _decompData = LZOHelper.LZOCompressor.Decompress(rawdata, 0, (int) ci.UncompressedSize);
                         //write_file(path, _decompData, _decompData.Length);
                         ok = _decompData.Length == (int) ci.UncompressedSize;
@@ -1859,7 +1997,7 @@ namespace HzNS.MdxLib.MDict
 
                         //byte[] txt = CompressUtil.InflaterDecompress(rawdata, 0, rawdata.Length);
 
-                        var path = $"{CompressUtil.stripPathExt(fs.Name)}.ctt.{kwi2.CIIndex:D5}.raw";
+                        var path = $"{Util.StripPathExt(fs.Name)}.ctt.{kwi2.CIIndex:D5}.raw";
                         writeFile(path, rawData);
                         //seg2name1 = CompressUtil.stripPathExt(fs.Name) + ".ctt.blk." + kwi2.ContentBlockIndex + ".bin";
                         //using (FileStream fsOut = File.Create(seg2name1))
@@ -1928,7 +2066,10 @@ namespace HzNS.MdxLib.MDict
 
                     try
                     {
-                        byte[] txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length);
+                        // byte[] txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length);
+                        // TODO need review and debug
+                        var txt = Zipper.InflateBufferWithPureZlib(rawData, rawData.Length);
+                        
                         //if (k < 1)
                         //{
                         //    string path = string.Format("{0}.seg2.cti.{1:D5}.unz", CompressUtil.stripPathExt(fs.Name), k);
@@ -1964,7 +2105,7 @@ namespace HzNS.MdxLib.MDict
                         var _decompSize = 0;
                         try
                         {
-                            _decompSize = MiniLZO.Decompress(rawData, _decompData);
+                            _decompSize = Zipper.MiniLzoDecompress(rawData, _decompData);
                             html = DictHeader.LanguageMode.GetString(_decompData, 0, _decompSize);
                         }
                         catch (Exception ex)
@@ -2006,6 +2147,471 @@ namespace HzNS.MdxLib.MDict
             }
 
             return html;
+        }
+
+        #endregion
+
+        
+        public override string Query(string word)
+        {
+            // Log($"-- Query : '{word}'");
+
+            var idx = findInLevel1(word);
+            if (idx < 0) return string.Empty;
+
+            const int bufSize = 32768;
+            using var fs = new FileStream(this.DictFileName, FileMode.Open, FileAccess.Read, FileShare.Read, bufSize);
+            
+            var w = word;
+            if (!DictHeader.KeyCaseSensitiveBool)
+                w = word.ToUpperInvariant();
+
+            var kw1 = _seg1.IndexList[idx];
+            var l2 = readLevel2Block(idx, kw1, fs);
+            KwIndex2 result = null; // = l2.Find(kw2 => kw2.Keyword == word);
+            var size = -1;
+            for (var x = 0; x < l2.Count; x++)
+            {
+                if (l2[x].Keyword.ToUpperInvariant() != w) continue;
+
+                result = l2[x];
+                if (x < l2.Count - 1)
+                {
+                    var nextOne = l2[x + 1];
+                    size = (int) (nextOne.RelOffsetUL - result.RelOffsetUL);
+                }
+
+                break;
+            }
+
+            if (result == null) return string.Empty;
+
+            Console.WriteLine($"<!-- kw1 block #{idx}: {kw1} -->");
+            Console.WriteLine($"<!-- kw2 found: {result} @ kw1 block #{idx} -->");
+
+            Console.WriteLine($"<!-- unzipped offset: 0x{result.RelOffsetUL:X8}|{result.RelOffsetUL} -->");
+            foreach (var ci in DictLargeContentIndexTable.Indexes)
+            {
+                if (result.RelOffsetUL > ci.OffsetUncomp + ci.UncompressedSize) continue;
+
+                Console.WriteLine($"<!-- ctt: block found ({ci}) | Seg2ContentBlockOffset = 0x{_seg2.Seg2ContentBlockOffset:X8}, ContentIndexTableEndPos = 0x{ContentIndexTableEndPos:X8} -->");
+                
+                var block = seekAndLoadCttBlock(fs, ci);
+                var ofs = (int) (result.RelOffsetUL - ci.OffsetUncomp);
+                var data = new byte[size > 0 ? size : block.Length - ofs];
+                Array.Copy(block, ofs, data, 0, size);
+                Console.WriteLine($"<!-- ctt entry '{word}': ofs = 0x{ofs:X8}/{ofs}, len = 0x{data.Length:X8}/{data.Length} -->");
+
+                var html = DictHeader.LanguageMode.GetString(data, 0, data.Length);
+                html = Normalize(html);
+                return html;
+            }
+
+            return string.Empty;
+        }
+
+        private string Normalize(string src)
+        {
+            if (src.StartsWith("@@@LINK="))
+            {
+                var word = src.Substring(3 + 4 + 1).TrimEnd('\n', '\r', ' ', '\t', '\0');
+                Console.WriteLine($"<!-- forwarding to '{word}' -->");
+                return Query(word);
+            }
+
+            return src;
+        }
+        
+        #region readLevel2Block
+
+        private KwIndex2List readLevel2Block(int idx, KwIndex1 kw1, Stream fs)
+        {
+            var pos = Seg2BeginPos;
+            // ulong unzipped = 0;
+            for (var kwiIdx = 0; kwiIdx < idx; kwiIdx++)
+            {
+                var kwi = _seg1.IndexList[kwiIdx];
+                pos += kwi.CompressedSize;
+                // unzipped += kwi.UncompressedSize;
+                // Console.WriteLine(
+                    // $"seg 1, block {kwiIdx}, end pos = {pos}/0x{pos:X8} | unzipped offset: {unzipped} | kwi = {kwi}");
+            }
+
+            // Console.WriteLine($"seg 1, block {idx}, start pos = {pos}/0x{pos:X8} | kwi = {kw1}");
+
+            var list2 = new KwIndex2List();
+
+            fs.Seek((long) pos, SeekOrigin.Begin);
+            var magicNum = readUInt32(fs);
+            var j2 = readUInt32(fs);
+            var rawData = new byte[kw1.CompressedSize - 8];
+            fs.Read(rawData, 0, rawData.Length);
+
+            if (magicNum == 0x02000000)
+            {
+                #region InflaterDecompress
+
+                try
+                {
+                    // var txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length, false);
+                    // TODO need review and debug
+                    var txt = Zipper.InflateBufferWithPureZlib(rawData, rawData.Length);
+                    
+                    #region log & trying to parse 2nd level indexes
+
+                    var ofs = 0;
+                    while (ofs < txt.Length)
+                    {
+                        var kwi2 = new KwIndex2 {RelOffsetUL = readUInt64(txt, ofs)};
+                        ofs += 8;
+                        var ofs0 = ofs;
+                        if (Equals(DictHeader.LanguageMode, Encoding.Unicode))
+                        {
+                            uint x9 = 1;
+                            while (x9 != 0)
+                            {
+                                x9 = readUInt16(txt, ofs);
+                                ofs += 2;
+                            }
+                        }
+                        else
+                        {
+                            while (txt[ofs] != 0) ofs++;
+                            ofs++;
+                        }
+
+                        kwi2.Keyword = DictHeader.LanguageMode.GetString(txt, ofs0, ofs - ofs0).TrimEnd('\0');
+                        list2.Add(kwi2);
+                    }
+
+                    #endregion
+                }
+                catch (Exception ex)
+                {
+                    ErrorLog(ex.ToString());
+                    throw;
+                }
+
+                #endregion
+            }
+            else if (magicNum == 0x01000000)
+            {
+                #region LZO.Decompress (V2.0 & V1.2)
+
+                #region v1.2: 提取二级索引表
+
+                var ofs = 0;
+                var cZipped = rawData[ofs]; //预览一个word
+                var zipped = cZipped != (byte) 0; //如果头一个byte为0，则实际上该块未压缩。
+                byte[] decompressedData;
+
+                if (!zipped)
+                {
+                    decompressedData = rawData;
+                }
+                else
+                {
+                    #region TODO: unzip
+
+                    decompressedData = new byte[kw1.UncompressedSize];
+                    var ok = false;
+                    // var in_len = rawData.Length - 3;
+                    // int out_len = BitConverter.ToInt16(rawData, 1);
+
+                    // if (!ok)
+                    {
+                        try
+                        {
+                            Zipper.MiniLzoDecompress(rawData, 0, (int) kw1.CompressedSize, decompressedData);
+                            ok = decompressedData.Length == (int) kw1.UncompressedSize;
+                            // Debug.Assert(ok, "M-dict 1.2 lzo decompressed failed.");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine(ex.ToString());
+                        }
+                    }
+
+                    if (!ok)
+                    {
+                        ErrorLog("BAD, 1.1");
+                    }
+
+                    #endregion
+                }
+
+                #region 解释二级索引表
+
+                while (ofs < (int) kw1.UncompressedSize)
+                {
+                    var kwi2 = new KwIndex2 {RelOffsetUL = readUInt32(decompressedData, ofs)};
+                    ofs += 4; // if (x1 < 0) { Debug.WriteLine(">>> ???"); }
+                    var ofs0 = ofs;
+                    if (Equals(DictHeader.LanguageMode, Encoding.Unicode))
+                    {
+                        uint x9 = 1;
+                        while (x9 != 0)
+                        {
+                            x9 = readUInt16(decompressedData, ofs);
+                            ofs += 2;
+                        }
+                    }
+                    else
+                    {
+                        while (decompressedData[ofs] != 0) ofs++;
+                        ofs++;
+                    }
+
+                    kwi2.Keyword = DictHeader.LanguageMode.GetString(decompressedData, ofs0, ofs - ofs0)
+                        .TrimEnd('\0');
+                    list2.Add(kwi2);
+                }
+
+                #endregion
+
+                #endregion
+
+                #endregion
+            }
+            else if (magicNum == 0)
+            {
+                #region log & trying to parse 2nd level indexes
+
+                var ofs = 0;
+                while (ofs < rawData.Length)
+                {
+                    var kwi2 = new KwIndex2 {RelOffsetUL = readUInt32(rawData, ofs)};
+                    ofs += 4;
+                    var ofs0 = ofs;
+                    if (Equals(DictHeader.LanguageMode, Encoding.Unicode))
+                    {
+                        uint x9 = 1;
+                        while (x9 != 0)
+                        {
+                            x9 = readUInt16(rawData, ofs);
+                            ofs += 2;
+                        }
+                    }
+                    else
+                    {
+                        while (rawData[ofs] != 0) ofs++;
+                        ofs++;
+                    }
+
+                    kwi2.Keyword = DictHeader.LanguageMode.GetString(rawData, ofs0, ofs - ofs0).TrimEnd('\0');
+                    list2.Add(kwi2);
+                    Log($"    > {kwi2}");
+                }
+
+                #endregion
+            }
+            else
+            {
+                throw new Exception(
+                    $"提取KWIndex2[]时，期望正确的算法标志0x2000000/0x1000000，然而遇到了{magicNum}/0x{magicNum:X}");
+            }
+
+            return list2;
+        }
+
+        #endregion
+
+        private int findInLevel1(string word)
+        {
+            try
+            {
+                // var idx = _seg1.Matcher.Match(word);
+                // return idx;
+
+                var w = word;
+                if (!DictHeader.KeyCaseSensitiveBool)
+                    w = word.ToUpperInvariant();
+                    
+                for (var kwiIdx = 0; kwiIdx < _seg1.IndexList.Length; kwiIdx++)
+                {
+                    var kwi = _seg1.IndexList[kwiIdx];
+                    if (DictHeader.KeyCaseSensitiveBool)
+                    {
+                        if (string.CompareOrdinal(word, kwi.KeywordEnd) < 0)
+                            return kwiIdx;
+                    }
+                    else
+                    {
+                        if (string.CompareOrdinal(w, kwi.KeywordEnd.ToUpperInvariant()) < 0)
+                            return kwiIdx;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // ignored
+            }
+
+            return -1;
+        }
+
+        #region seekAndLoadCttBlock
+        
+        private byte[] seekAndLoadCttBlock(Stream fs, ContentIndex ci)
+        {
+            var ofs = ContentIndexTableEndPos + 8 + ci.Offset;
+            fs.Seek((long) ofs, SeekOrigin.Begin);
+            Console.WriteLine();
+            Console.WriteLine($"<!-- seek to 0x{fs.Position:X8}/{fs.Position}, file length = 0x{fs.Length:X8}/{fs.Length} -->");
+            Console.WriteLine();
+
+            #region read this content table
+
+            var magicNumber = _seg2.MagicNumber;
+            var rawData = new byte[ci.CompressedSize];
+            var r = fs.Read(rawData, 0, rawData.Length);
+            if (_seg2.MagicNumber == 0)
+            {
+                if (ci.CompressedSize == ci.UncompressedSize)
+                    return rawData;
+                magicNumber = 0x01000000;
+            }
+            
+            #endregion
+
+            #region unzip it
+
+            if (magicNumber == 0x02000000)
+            {
+                #region InflaterDecompress, Passed
+
+                try
+                {
+                    // var txt = CompressUtil.InflaterDecompress(rawData, 0, rawData.Length);
+                    var txt = Zipper.InflateBufferWithPureZlib(rawData, rawData.Length);
+                    
+                    var path = $"{Util.StripPathExt(DictFileName)}.ctt.blk.ofs.{ofs}.txt";
+                    writeFile(path, txt);
+
+                    // var b = new byte[ci.UncompressedSize];
+                    // Array.Copy(txt, (int) kwi2.CIUncompOffset, b, 0, (int) kwi2.CIUncompLength);
+                    // return b;
+
+                    return txt;
+                }
+                catch (Exception ex)
+                {
+                    ErrorLog(ex.ToString());
+                    throw;
+                }
+
+                #endregion
+            }
+            else if (magicNumber == 0x01000000)
+            {
+                //对于1.2版本格式，可能并未压缩，故如果LZO失败，则将rawdata原样返回
+
+                #region 试图进行 LZO Decompress。
+
+                //Lzo1x解压缩
+                var ok = false;
+                var _decompData = new byte[ci.UncompressedSize];
+                var _decompSize = 0;
+
+                // if (!ok)
+                {
+                    try
+                    {
+                        Zipper.MiniLzoDecompress(rawData, 0, (int) ci.CompressedSize - 8, _decompData);
+                        ok = _decompData.Length == (int) ci.UncompressedSize;
+                        
+                        // var b = new byte[ci.UncompressedSize];
+                        // Array.Copy(_decompData, (int) kwi2.CIUncompOffset, b, 0, (int) kwi2.CIUncompLength);
+                        // return b;
+                        return _decompData;
+                    }
+                    catch (Exception ex1)
+                    {
+                        ErrorLog(ex1.ToString());
+                    }
+                }
+
+                if (!ok)
+                {
+                    try
+                    {
+                        // 1.2版本格式，cti数据块的长度为CompressedSize-8，数据块的末尾8个字节含义暂时未知。
+                        //byte[] xyz = new byte[rawdata.Length - 8];
+                        //Array.Copy(rawdata, xyz, xyz.Length);
+                        Zipper.MiniLzoDecompress(rawData, 0, rawData.Length - 8, _decompData);
+                        // _decompSize = Zipper.MiniLzoDecompress(rawdata, 0, rawdata.Length - 8, _decompData);
+                        //xyz = new byte[8];
+                        //byte[] _decompData1 = new byte[100];
+                        //Array.Copy(rawdata, ci.CompressedSize-8, xyz, 0, xyz.Length);
+                        //_decompSize = Zipper.MiniLzoDecompress(xyz, _decompData1);
+
+                        #region debug
+
+                        //if (k < 1)
+                        //{
+                        //    string path = string.Format("{0}.seg2.cti.{1:D5}.unz", CompressUtil.stripPathExt(fs.Name), k);
+                        //    write_file(path, _decompData, _decompSize);
+                        //    //write_file(CompressUtil.stripPathExt(fs.Name) + ".seg2.cti." + k + ".unz", _decompData, _decompSize);
+                        //}
+
+                        #endregion
+
+                        if (_decompSize == (int) ci.UncompressedSize)
+                            return _decompData;
+
+                        // var b = new byte[kwi2.CIUncompLength];
+                        // Array.Copy(_decompData, (int) kwi2.CIUncompOffset, b, 0, (int) kwi2.CIUncompLength);
+                        // return b;
+                        // //byte[] b = new byte[_decompSize];
+                        // //Array.Copy(_decompData, b, _decompSize);
+                        // //return b;
+                        return _decompData;
+                    }
+                    catch (Exception ex)
+                    {
+                        //if (this.DictHeader.GeneratedByEngineVersion == "2.0")
+                        {
+                            ErrorLog(ex.ToString());
+                        }
+                    }
+                }
+
+                if (!ok)
+                {
+                    try
+                    {
+                        Zipper.MiniLzoDecompress(rawData, 0, (int) ci.CompressedSize, _decompData);
+                        // _decompData = LZOHelper.LZOCompressor.Decompress(rawdata, 0, (int) ci.UncompressedSize);
+                        //write_file(path, _decompData, _decompData.Length);
+                        ok = _decompData.Length == (int) ci.UncompressedSize;
+                    }
+                    catch (Exception ex1)
+                    {
+                        ErrorLog(ex1.ToString());
+                        throw;
+                    }
+                }
+
+                #endregion
+
+                //此外，1.2版本格式也可能采用了第二种压缩方式，这种情况下ci.UncompressedSize!=ci.CompressedSize
+                //if (this.DictHeader.GeneratedByEngineVersion == "1.2")
+                if (ci.UncompressedSize == ci.CompressedSize)
+                {
+                    //Version 1.2: 数据内容并未压缩故可直接取用。
+                    return rawData;
+                }
+                else
+                {
+                    return rawData;
+                }
+            }
+            else
+            {
+                throw new Exception($"提取KWIndex时，期望正确的算法标志0x2000000/0x1000000，然而遇到了{_seg2.MagicNumber}");
+            }
+
+            #endregion
         }
 
         #endregion
@@ -2188,6 +2794,8 @@ namespace HzNS.MdxLib.MDict
         // }
 
         public bool debugModeEnable = false;
-        public bool walkOnContentIndexTable = false;
+
+        public bool dumpAllKeywords = true;
+        // public bool walkOnContentIndexTable = false;
     }
 }

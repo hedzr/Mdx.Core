@@ -93,9 +93,9 @@ namespace HzNS.MdxLib.MDict.Tool
             //List<Node<T>> res = new List<Node<T>>();
             Node<T> root = Root;
             Node<T> last = null;
-            for (int i = 0; i < s.Length; ++i)
+            foreach (var t in s)
             {
-                char c = s[i];
+                var c = t;
                 if (NoCase) c = char.ToLower(c);
                 //addChar(root, c);
                 if (!root.Children.ContainsKey(c))

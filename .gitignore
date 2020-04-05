@@ -2,6 +2,13 @@ bin/
 obj/
 /packages/
 
+ref.*.md
+*.CSS
+*.css
+*.html
+build.sh
+Makefile
+
 *.dmp
 *.out
 *.log

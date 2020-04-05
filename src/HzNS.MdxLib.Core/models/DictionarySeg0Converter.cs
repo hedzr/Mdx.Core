@@ -12,7 +12,7 @@ namespace HzNS.MdxLib.models
         {
             if (destinationType == typeof(MDictIndex))
                 return true;
-            if (destinationType == typeof(MDictKwIndexTable))
+            if (destinationType == typeof(MDictKwIndexTables))
                 return true;
             if (destinationType == typeof(MDictContentIndexTable))
                 return true;
@@ -32,9 +32,9 @@ namespace HzNS.MdxLib.models
                     return string.Format("{1} items", 0, so.Seg1Length);
                 }
 
-                if (value is MDictKwIndexTable)
+                if (value is MDictKwIndexTables)
                 {
-                    MDictKwIndexTable so = (MDictKwIndexTable) value;
+                    MDictKwIndexTables so = (MDictKwIndexTables) value;
                     return string.Format("{1} items, {0} bytes", so.RawCount, so.IndexList.Length);
                 }
 

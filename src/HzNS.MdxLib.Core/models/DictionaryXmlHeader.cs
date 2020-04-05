@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Globalization;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Xml.Serialization;
-using HzNS.MdxLib.MDict.Tool;
 
 namespace HzNS.MdxLib.models
 {
@@ -19,6 +18,14 @@ namespace HzNS.MdxLib.models
     /// </summary>
     [XmlRoot("Dictionary")]
     [TypeConverter(typeof(DictionaryXmlHeaderConverter)), Description("展开以查看应用程序的拼写选项。")]
+    [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
+    [SuppressMessage("ReSharper", "UnusedAutoPropertyAccessor.Global")]
+    [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
+    [SuppressMessage("ReSharper", "ReturnTypeCanBeEnumerable.Global")]
+    [SuppressMessage("ReSharper", "ConvertToAutoPropertyWithPrivateSetter")]
+    [SuppressMessage("ReSharper", "UnusedMember.Global")]
+    [SuppressMessage("ReSharper", "ConvertToAutoPropertyWhenPossible")]
+    [SuppressMessage("ReSharper", "ReturnTypeCanBeEnumerable.Global")]
     public class DictionaryXmlHeader
     {
         public override string ToString()
@@ -240,113 +247,6 @@ namespace HzNS.MdxLib.models
         }
     }
 
-    #region DictionaryXmlHeaderConverter
-
-    public class DictionaryXmlHeaderConverter : ExpandableObjectConverter
-    {
-        public override bool CanConvertTo(ITypeDescriptorContext context, Type destinationType)
-        {
-            if (destinationType == typeof(DictionaryXmlHeader))
-                return true;
-            return base.CanConvertTo(context, destinationType);
-        }
-
-        public override object ConvertTo(ITypeDescriptorContext context, CultureInfo culture,
-            object value, Type destinationType)
-        {
-            if (destinationType == typeof(String) && value is DictionaryXmlHeader)
-            {
-                DictionaryXmlHeader so = (DictionaryXmlHeader) value;
-                return so.GeneratedByEngineVersion;
-            }
-
-            return base.ConvertTo(context, culture, value, destinationType);
-        }
-    }
-
-    #endregion
-
-    public class CssEntry
-    {
-        public int _index;
-
-        public int Index
-        {
-            get => _index;
-            set => _index = value;
-        }
-
-        public string Begin { get; set; }
-        public string End { get; set; }
-    }
-
-
-    [TypeConverter(typeof(DictionarySeg0Converter)), Description("展开以查看应用程序的拼写选项。")]
-    public class MDictKwIndexTable
-    {
-        /// <summary>
-        /// 加密后的索引块首先被缓存于此；随后解密并解压后的索引块仍然放在这里。
-        /// </summary>
-        public List<byte> IndexesRawData { get; set; }
-
-        [Browsable(false)] public int RawCount => IndexesRawData?.Count ?? -1;
-
-        /// <summary>
-        /// = Seg1
-        /// </summary>
-        public KwIndex1[] IndexList { get; set; }
-        public KwIndexMap KwIndexMap { get; set; }
-        /// <summary>
-        /// = Seg2
-        /// </summary>
-        public KwIndex2[] IndexList2 { get; set; }
-
-        public int TotalEntries => IndexList2?.Length ?? 0;
-
-        /// <summary>
-        /// 这个数据结构用于进行快速的起始字符串匹配。
-        /// 当用户键入一个字符串序列时，Matcher能够快速地匹配到最接近的一条关键字(从KWIndex2中)，并返回其下标值
-        /// </summary>
-        public FastRobustMatcher<int> Matcher { get; set; }
-    }
-
-    [TypeConverter(typeof(DictionarySeg0Converter)), Description("展开以查看应用程序的拼写选项。")]
-    public class MDictContentIndexTable
-    {
-        /// <summary>
-        /// 决定了解压缩采用什么算法
-        /// </summary>
-        public uint MagicNumber { get; set; }
-
-        public List<byte> IndexesRawData { get; set; }
-
-        [Browsable(false)] public int RawCount => IndexesRawData?.Count ?? -1;
-
-        /// <summary>
-        /// 索引表，每两个long值表示一个索引入口，指向一条正文内容。
-        /// </summary>
-        //public long[] Indexes { get; set; }
-        public ContentIndex[] Indexes { get; set; }
-
-        /// <summary>
-        /// 索引个数(Indexes每两个long值代表一个索引项目)
-        /// </summary>
-        public ulong Count { get; set; }
-
-        public ulong L2 { get; set; }
-
-        /// <summary>
-        /// 索引表本身的块长度
-        /// </summary>
-        public ulong IndexTableLength { get; set; }
-
-        public ulong L4 { get; set; }
-
-        /// <summary>
-        /// 索引表尾部的文件偏移量，也即内容块的起始文件偏移
-        /// </summary>
-        public ulong Seg2ContentBlockOffset { get; set; }
-    }
 
     ///// <summary>
     ///// 压缩块的压缩信息

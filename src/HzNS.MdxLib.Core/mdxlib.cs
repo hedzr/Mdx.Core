@@ -2,7 +2,7 @@
 
 namespace HzNS.MdxLib
 {
-    public class Class1
+    public class MdxLib
     {
     }
 }

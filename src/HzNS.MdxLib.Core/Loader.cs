@@ -35,7 +35,7 @@ namespace HzNS.MdxLib
         public bool IsLibraryData { get; internal set; }
 
         public abstract MDictIndex DictIndex { get; set; }
-        public abstract MDictKwIndexTable DictKwIndexTable { get; set; }
+        public abstract MDictKwIndexTables DictKwIndexTables { get; set; }
         public abstract MDictContentIndexTable DictLargeContentIndexTable { get; set; }
 
         //public virtual Dictionary<string, DictItem> DictItems { get; set; }

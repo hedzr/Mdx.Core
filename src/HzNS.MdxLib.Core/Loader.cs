@@ -30,6 +30,7 @@ namespace HzNS.MdxLib
         }
 
         protected bool HeaderIsValidate;
+        protected ulong HeaderBytes;
         // ReSharper disable once MemberCanBeProtected.Global
         public bool IsLibraryData { get; internal set; }
 
@@ -82,6 +83,11 @@ namespace HzNS.MdxLib
             return true;
         }
 
+        public virtual string Query(string word)
+        {
+            return string.Empty;
+        }
+        
         public virtual byte[] LoadContentBytesByKeyword(KwIndex2 kwi2)
         {
             throw new NotImplementedException();
@@ -109,7 +115,7 @@ namespace HzNS.MdxLib
 
         public void Dispose()
         {
-            Console.WriteLine("Loader.Dispose()");
+            // Console.WriteLine("Loader.Dispose()");
             Shutdown();
         }
 

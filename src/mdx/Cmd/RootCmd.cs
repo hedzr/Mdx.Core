@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using HzNS.Cmdr;
 using HzNS.Cmdr.Base;
 using HzNS.Cmdr.Internal.Base;
@@ -17,7 +18,7 @@ namespace mdx.Cmd
         public static RootCmd New(IAppInfo appInfo, params Action<RootCmd>[] opts)
         {
             var r = new RootCmd(appInfo);
-            
+
             foreach (var opt in opts)
             {
                 opt(r);
@@ -28,8 +29,10 @@ namespace mdx.Cmd
 
         public void Invoke(IBaseWorker w, IEnumerable<string> remainsArgs)
         {
+            var count = 0;
             foreach (var filename in remainsArgs)
             {
+                count++;
                 if (string.IsNullOrEmpty(filename)) continue;
 
                 w.log.logInfo($"loading {filename} ...");
@@ -51,6 +54,12 @@ namespace mdx.Cmd
 
                     // l.Dispose();
                 }
+            }
+
+            if (count == 0)
+            {
+                w.ShowHelpScreen(w, remainsArgs.ToArray());
+                return;
             }
 
             if (w.ParsedCount == 0)

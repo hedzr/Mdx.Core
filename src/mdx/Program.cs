@@ -1,7 +1,11 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using HzNS.Cmdr;
 using HzNS.Cmdr.Base;
 using HzNS.Cmdr.Logger.Serilog;
+using HzNS.MdxLib.MDict;
 using mdx.Cmd;
 
 namespace mdx
@@ -20,16 +24,31 @@ namespace mdx
         {
             // Cmdr: A CommandLine Arguments Parser
             Cmdr.NewWorker(RootCmd.New(
-                        new AppInfo {AppName = "mdxTool", }, (root) =>
-                    {
-                        root.AddCommand(new Command {Short = "t", Long = "tags", Description = "tags operations"}
-                            .AddCommand(new TagsAddCmd())
-                            .AddCommand(new TagsRemoveCmd())
-                            // .AddCommand(new TagsAddCmd { }) // dup-test
-                            .AddCommand(new TagsListCmd())
-                            .AddCommand(new TagsModifyCmd())
-                        );
-                    }), // <- RootCmd
+                        new AppInfo {AppName = "mdx-tool",}, (root) =>
+                        {
+                            root.AddCommand(new Command
+                            {
+                                Short = "lkp", Long = "lookup", Description = "dictionary lookup tool",
+                                TailArgs = "<Mdx Files (*.mdx;*.mdd)> <word-pattern>",
+                                Action = (lookupAction)
+                            });
+
+                            root.AddCommand(new Command
+                            {
+                                Short = "ls", Long = "list",
+                                Description = "list a dictionary entries and dump for debugging",
+                                TailArgs = "<Mdx Files (*.mdx;*.mdd)>",
+                                Action = (listAction)
+                            });
+
+                            root.AddCommand(new Command {Short = "t", Long = "tags", Description = "tags operations"}
+                                .AddCommand(new TagsAddCmd())
+                                .AddCommand(new TagsRemoveCmd())
+                                // .AddCommand(new TagsAddCmd { }) // dup-test
+                                .AddCommand(new TagsListCmd())
+                                .AddCommand(new TagsModifyCmd())
+                            );
+                        }), // <- RootCmd
                     // Options ->
                     (w) =>
                     {
@@ -54,6 +73,61 @@ namespace mdx
 
             // Log.CloseAndFlush();
             // Console.ReadKey();
+        }
+
+        // ReSharper disable once InconsistentNaming
+        private static void lookupAction(IBaseWorker w, IBaseOpt cmd, IEnumerable<string> args)
+        {
+            var enumerable = args.ToList();
+            var mdxFile = enumerable.ElementAtOrDefault(0);
+            var word = enumerable.ElementAtOrDefault(1);
+            if (string.IsNullOrWhiteSpace(mdxFile))
+            {
+                w.ShowHelpScreen(w, enumerable);
+                // w.ErrorPrint("no valid mdx file specified.");
+                return;
+            }
+
+            var mdx = new MDictLoader(mdxFile);
+            if (!mdx.Process())
+            {
+                // w.ErrorPrint($"CANNOT load and process the mdx file: {mdxFile}.");
+                return;
+            }
+
+            Console.WriteLine($"<!--\n\nHeader: \n\n{mdx.DictHeader}\n\nIndex: \n\n{mdx.DictIndex}\n\n-->\n");
+
+            if (!string.IsNullOrWhiteSpace(word))
+            {
+                // Console.WriteLine($"Lookup for word '{word}'...");
+                // Console.WriteLine(word);
+                var s = mdx.Query(word);
+                Console.WriteLine(s);
+            }
+        }
+
+        // ReSharper disable once InconsistentNaming
+        private static void listAction(IBaseWorker w, IBaseOpt cmd, IEnumerable<string> args)
+        {
+            var enumerable = args.ToList();
+            var mdxFile = enumerable.ElementAtOrDefault(0);
+            var word = enumerable.ElementAtOrDefault(1);
+            if (string.IsNullOrWhiteSpace(mdxFile))
+            {
+                w.ShowHelpScreen(w, enumerable);
+                // w.ErrorPrint("no valid mdx file specified.");
+                return;
+            }
+
+            Console.WriteLine($"{mdxFile} / {word}");
+            var mdx = new MDictLoader(mdxFile) {PreloadAll = true};
+            if (!mdx.Process())
+            {
+                // w.ErrorPrint($"CANNOT load and process the mdx file: {mdxFile}.");
+                return;
+            }
+
+            Console.WriteLine($"Header: \n\n{mdx.DictHeader}\n\nIndex: \n\n{mdx.DictIndex}\n\n");
         }
     }
 }

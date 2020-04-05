@@ -14,9 +14,14 @@
       <Folder Include="logs" />
     </ItemGroup>
 
+<!--    <ItemGroup>-->
+<!--      <PackageReference Include="HzNS.Cmdr.Core" Version="1.0.97" />-->
+<!--      <PackageReference Include="HzNS.Cmdr.Logger.Serilog" Version="1.0.8" />-->
+<!--    </ItemGroup>-->
+
     <ItemGroup>
-      <PackageReference Include="HzNS.Cmdr.Core" Version="1.0.38" />
-      <PackageReference Include="HzNS.Cmdr.Logger.Serilog" Version="1.0.0" />
+        <ProjectReference Include="..\..\..\HzNS.Cmdr.Core\src\HzNS.Cmdr.Core\HzNS.Cmdr.Core.csproj" />
+        <PackageReference Include="HzNS.Cmdr.Logger.Serilog" Version="1.0.8" />
     </ItemGroup>
 
 </Project>
